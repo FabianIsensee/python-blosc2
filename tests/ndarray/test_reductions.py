@@ -1059,3 +1059,25 @@ def test_reduction_axis_chunk_layouts(chunks, blocks, axis, op):
         if op in ("sum", "max"):
             res = getattr(expr, op)(axis=axis, keepdims=True)
             np.testing.assert_array_equal(res, getattr(np, op)(nexpr, axis=axis, keepdims=True))
+
+
+@pytest.mark.parametrize("pos", [None, (0, 0), (36, 40), (18, 3)])
+@pytest.mark.parametrize("fill", [False, True])
+@pytest.mark.parametrize("reduce_op", ["min", "max", "any", "all"])
+def test_reduce_bool_padded_blocks(fill, reduce_op, pos, request):
+    # Chunks and blocks that do not tile the shape leave unwritten padding blocks, whose
+    # starting value must be the reduction's identity: True for min, False for max. The
+    # result stays bool on every path.
+    if reduce_op == "min" and fill and pos in ((36, 40), (18, 3)):
+        # The bundled miniexpr computes min of a padded bool block as the low byte of its
+        # count of true values; remove once a fixed miniexpr is bundled
+        request.applymarker(pytest.mark.xfail(strict=True, reason="miniexpr bool min over a padded block"))
+    na = np.full((37, 41), fill)
+    if pos is not None:
+        na[pos] = not fill
+    a = blosc2.asarray(na, chunks=(20, 25), blocks=(8, 10))
+    for arr, narr in ((a, na), (~a, ~na)):
+        for axis in (None, 0):
+            res = getattr(arr, reduce_op)(axis=axis)
+            np.testing.assert_array_equal(res, getattr(narr, reduce_op)(axis=axis))
+            assert np.asarray(res).dtype == np.bool_
