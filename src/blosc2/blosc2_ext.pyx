@@ -199,6 +199,13 @@ cdef extern from "blosc2.h":
         BLOSC2_SPECIAL_UNINIT
 
     ctypedef enum:
+        BLOSC_DOSHUFFLE
+        BLOSC_DOBITSHUFFLE
+        BLOSC_UDCODEC_FORMAT
+        BLOSC2_CHUNK_FLAGS
+        BLOSC2_CHUNK_FILTER_CODES
+
+    ctypedef enum:
         BLOSC2_VERSION_STRING
         BLOSC2_VERSION_REVISION
         BLOSC2_VERSION_DATE
@@ -1245,18 +1252,20 @@ def decompress(src, dst=None, as_bytearray=False):
     typed_view_src = mem_view_src.cast('B')
     _check_comp_length('src', len(typed_view_src))
     blosc2_cbuffer_sizes(<void*>&typed_view_src[0], &nbytes, &cbytes, &blocksize)
+    cdef int32_t srcsize = <int32_t>len(typed_view_src)
+    cdef c_bool own_ctx = _chunk_runs_python(&typed_view_src[0], srcsize)
     cdef Py_buffer buf
     if dst is not None:
         PyObject_GetBuffer(dst, &buf, PyBUF_SIMPLE)
         if buf.len == 0:
             raise ValueError("The dst length must be greater than 0")
-        size = blosc1_decompress(<void*>&typed_view_src[0], buf.buf, buf.len)
+        size = _blosc1_decompress(own_ctx, &typed_view_src[0], srcsize, buf.buf, buf.len)
         PyBuffer_Release(&buf)
     else:
         dst = PyBytes_FromStringAndSize(NULL, nbytes)
         if dst is None:
             raise RuntimeError("Could not get a bytes object")
-        size = blosc1_decompress(<void*>&typed_view_src[0], <void*> <char *> dst, len(dst))
+        size = _blosc1_decompress(own_ctx, &typed_view_src[0], srcsize, <void*> <char *> dst, len(dst))
         if as_bytearray:
             dst = bytearray(dst)
         if size >= 0:
@@ -1482,15 +1491,58 @@ cdef create_dparams_from_kwargs(blosc2_dparams *dparams, kwargs, blosc2_cparams*
     #dparams.typesize = typesize = kwargs.get('typesize', blosc2.dparams_dflts['typesize'])
     _check_dparams(dparams, cparams)
 
+# The offset in the extended header of a chunk of the id of its codec when the codec bits of its flags say
+# BLOSC_UDCODEC_FORMAT (README_CHUNK_FORMAT.rst in C-Blosc2; blosc2.h has no name for it)
+cdef enum:
+    _CHUNK_UDCODEC = 0x16
+
+cdef c_bool _chunk_runs_python(const uint8_t *chunk, int32_t chunksize) except? True:
+    """Whether decompressing `chunk` can run a codec or filter registered from Python, as its header tells.
+    Their callbacks need the GIL, so they must run on the calling thread: C-Blosc2's worker threads never
+    hold it."""
+    cdef uint8_t flags
+    cdef uint8_t codec
+    cdef uint8_t filter_id
+    cdef int i
+    if chunksize < BLOSC_EXTENDED_HEADER_LENGTH:
+        return False
+    flags = chunk[BLOSC2_CHUNK_FLAGS]
+    # Only an extended header (both shuffle flags set) can name user codecs and filters
+    if not (flags & BLOSC_DOSHUFFLE and flags & BLOSC_DOBITSHUFFLE):
+        return False
+    codec = flags >> 5  # the codec bits of the flags (5-7)
+    if codec == BLOSC_UDCODEC_FORMAT:
+        codec = chunk[_CHUNK_UDCODEC]
+    # Python ids are user-registered ones (up to 255): look up only those
+    if codec >= BLOSC2_USER_REGISTERED_CODECS_START and codec in blosc2.ucodecs_registry:
+        return True
+    for i in range(BLOSC2_MAX_FILTERS):
+        filter_id = chunk[BLOSC2_CHUNK_FILTER_CODES + i]
+        if filter_id >= BLOSC2_USER_REGISTERED_FILTERS_START and filter_id in blosc2.ufilters_registry:
+            return True
+    return False
+
+cdef int _blosc1_decompress(c_bool own_ctx, const void *src, int32_t srcsize, void *dest,
+                            size_t destsize) noexcept:
+    """blosc1_decompress(), which uses the global context and its number of threads, or with `own_ctx`, a
+    context of one thread of its own: for chunks that can run Python code (see _chunk_runs_python())."""
+    cdef blosc2_context *dctx
+    cdef int rc
+    if not own_ctx:
+        return blosc1_decompress(src, dest, destsize)
+    dctx = blosc2_create_dctx(BLOSC2_DPARAMS_DEFAULTS)  # one thread
+    if dctx == NULL:
+        return BLOSC2_ERROR_MEMORY_ALLOC
+    rc = blosc2_decompress_ctx(dctx, src, srcsize, dest, <int32_t>destsize)
+    blosc2_free_ctx(dctx)
+    return rc
+
 def decompress2(src, dst=None, **kwargs):
     cdef blosc2_dparams dparams
     cdef char *dst_buf
     cdef void *view
     create_dparams_from_kwargs(&dparams, kwargs)
 
-    cdef blosc2_context *dctx = blosc2_create_dctx(dparams)
-    if dctx == NULL:
-        raise RuntimeError("Could not create decompression context")
     cdef const uint8_t[:] typed_view_src
     mem_view_src = memoryview(src)
     typed_view_src = mem_view_src.cast('B')
@@ -1500,6 +1552,11 @@ def decompress2(src, dst=None, **kwargs):
     cdef int32_t blocksize
     cdef int32_t srcsize = <int32_t>typed_view_src.nbytes
     blosc2_cbuffer_sizes(<void*>&typed_view_src[0], &nbytes, &cbytes, &blocksize)
+    if dparams.nthreads > 1 and _chunk_runs_python(&typed_view_src[0], srcsize):
+        dparams.nthreads = 1
+    cdef blosc2_context *dctx = blosc2_create_dctx(dparams)
+    if dctx == NULL:
+        raise RuntimeError("Could not create decompression context")
     cdef Py_buffer buf
     if dst is not None:
         PyObject_GetBuffer(dst, &buf, PyBUF_SIMPLE)
@@ -1610,10 +1667,6 @@ def vldecompress(src, **kwargs):
     cdef blosc2_dparams dparams
     create_dparams_from_kwargs(&dparams, kwargs)
 
-    cdef blosc2_context *dctx = blosc2_create_dctx(dparams)
-    if dctx == NULL:
-        raise RuntimeError("Could not create decompression context")
-
     cdef const uint8_t[:] typed_view_src
     mem_view_src = memoryview(src)
     typed_view_src = mem_view_src.cast('B')
@@ -1623,6 +1676,11 @@ def vldecompress(src, **kwargs):
     cdef int32_t nblocks
     cdef int32_t srcsize = <int32_t>typed_view_src.nbytes
     blosc2_cbuffer_sizes(<void*>&typed_view_src[0], &nbytes, &cbytes, &nblocks)
+    if dparams.nthreads > 1 and _chunk_runs_python(&typed_view_src[0], srcsize):
+        dparams.nthreads = 1
+    cdef blosc2_context *dctx = blosc2_create_dctx(dparams)
+    if dctx == NULL:
+        raise RuntimeError("Could not create decompression context")
     if nblocks <= 0:
         blosc2_free_ctx(dctx)
         raise ValueError("Chunk does not contain VL blocks")
