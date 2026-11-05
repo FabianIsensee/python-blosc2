@@ -139,9 +139,10 @@ def test_insert_after_another_handle_appended(tmp_path, locking):
         np.testing.assert_array_equal(got, np.full(CHUNK_LEN, value, dtype=np.int32))
 
 
+@pytest.mark.skipif(blosc2.IS_WASM, reason="no threads on wasm32")
 def test_data_writes_from_threads(tmp_path):
     # Each thread compresses into its own reused buffer; frames in memory and on disk
-    blosc2.set_releasegil(True)
+    old = blosc2.set_releasegil(True)
     try:
         nthreads = 4
         schunks = [
@@ -173,4 +174,4 @@ def test_data_writes_from_threads(tmp_path):
             for n, got in enumerate(chunks_of(schunk)):
                 np.testing.assert_array_equal(got, np.full(CHUNK_LEN, -(100 * i + n), dtype=np.int32))
     finally:
-        blosc2.set_releasegil(False)
+        blosc2.set_releasegil(old)
