@@ -585,6 +585,7 @@ cdef extern from "blosc2.h":
         blosc2_codec_decoder_cb decoder
 
     int blosc2_register_codec(blosc2_codec *codec)
+    int blosc2_register_codec_flags(blosc2_codec *codec, int flags)
 
     ctypedef int(*blosc2_filter_forward_cb)(const uint8_t *, uint8_t *, int32_t, uint8_t, blosc2_cparams *, uint8_t)
     ctypedef int(*blosc2_filter_backward_cb)(const uint8_t *, uint8_t *, int32_t, uint8_t, blosc2_dparams *, uint8_t)
@@ -596,6 +597,10 @@ cdef extern from "blosc2.h":
         blosc2_filter_backward_cb backward
 
     int blosc2_register_filter(blosc2_filter *filter)
+    int blosc2_register_filter_flags(blosc2_filter *filter, int flags)
+
+    enum:
+        BLOSC2_CALLING_THREAD_ONLY
 
     int blosc2_get_slice_nchunks(blosc2_schunk * schunk, int64_t *start, int64_t *stop, int64_t ** chunks_idx)
 
@@ -6099,7 +6104,9 @@ def register_codec(codec_name, id, encoder=None, decoder=None, version=1):
     _nogil_reads_blocked += 1
     try:
         _wait_for_nogil_reads()
-        rc = blosc2_register_codec(&codec)
+        # Python callbacks need the GIL, which only the calling thread holds: C-Blosc2 must not run them on
+        # its worker threads, whatever nthreads or BLOSC_NTHREADS say
+        rc = blosc2_register_codec_flags(&codec, BLOSC2_CALLING_THREAD_ONLY if encoder is not None else 0)
         if rc < 0:
             raise RuntimeError("Error while registering codec")
 
@@ -6174,7 +6181,8 @@ def register_filter(id, forward, backward, filter_name):
     _nogil_reads_blocked += 1
     try:
         _wait_for_nogil_reads()
-        rc = blosc2_register_filter(&filter)
+        # As in register_codec()
+        rc = blosc2_register_filter_flags(&filter, BLOSC2_CALLING_THREAD_ONLY if forward is not None else 0)
         if rc < 0:
             raise RuntimeError("Error while registering filter")
         if forward and backward:
