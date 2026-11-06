@@ -2521,7 +2521,8 @@ def register_codec(
 
     Notes
     -----
-    * Cannot use multi-threading when using a user-defined codec.
+    * C-Blosc2 runs a codec registered with Python functions on the calling thread, one block
+      after another, whatever ``nthreads`` says.
 
     * User-defined codecs can only be used inside an `SChunk` instance.
 
@@ -2599,7 +2600,8 @@ def register_filter(
 
     Notes
     -----
-    * Multi-threading cannot be used with a user-defined filter.
+    * C-Blosc2 runs a filter registered with Python functions on the calling thread, one block
+      after another, whatever ``nthreads`` says.
 
     * User-defined filters can only be used inside an `SChunk` instance.
 

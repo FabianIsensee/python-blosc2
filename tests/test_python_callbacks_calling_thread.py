@@ -6,9 +6,10 @@
 #######################################################################
 
 # Codecs and filters registered from Python need the GIL, so C-Blosc2 must run them on the calling
-# thread whatever the number of threads: BLOSC_NTHREADS replaces the nthreads of every context, and
-# super-chunks made from frames get the global number of threads.  On failure the callbacks run on
-# C-Blosc2's worker threads and crash the interpreter, so every case runs in a child interpreter.
+# thread whatever the number of threads: BLOSC_NTHREADS replaces the nthreads of every context,
+# super-chunks made from frames get the global number of threads and opened ones blosc2.nthreads.
+# On failure the callbacks run on C-Blosc2's worker threads and crash the interpreter, so every
+# case runs in a child interpreter.
 
 import os
 import subprocess
@@ -84,8 +85,10 @@ CHILD = textwrap.dedent(
     [
         # C-Blosc2 gives every context BLOSC_NTHREADS threads, also the ones asking for 1
         ("new", "BLOSC_NTHREADS"),
-        # A super-chunk made from a frame gets C-Blosc2's global number of threads
+        # A super-chunk made from a frame gets C-Blosc2's global number of threads, an opened one
+        # blosc2.nthreads
         ("frame", "set_nthreads"),
+        ("file", "set_nthreads"),
     ],
 )
 def test_python_callbacks_calling_thread(kind, source, threads_from, tmp_path):

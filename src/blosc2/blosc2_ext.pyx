@@ -3587,10 +3587,6 @@ def get_blocksize():
 
 cdef _check_cparams(blosc2_cparams *cparams):
     if cparams.nthreads > 1:
-        if _python_codec_ids[cparams.compcode]:
-            raise ValueError("Cannot use multi-threading with user defined Python codecs")
-        if _uses_python_filter(cparams):
-            raise ValueError("Cannot use multi-threading with user defined Python filters")
         if _prefilter_runs_python(cparams.prefilter):
             raise ValueError("`nthreads` must be 1 when a prefilter is set")
             raise ValueError("`nthreads` must be 1 when a prefilter is set")
@@ -3599,10 +3595,6 @@ cdef _check_dparams(blosc2_dparams* dparams, blosc2_cparams* cparams=NULL):
     if cparams == NULL:
         return
     if dparams.nthreads > 1:
-        if _python_codec_ids[cparams.compcode]:
-            raise ValueError("Cannot use multi-threading with user defined Python codecs")
-        if _uses_python_filter(cparams):
-            raise ValueError("Cannot use multi-threading with user defined Python filters")
         if dparams.postfilter != NULL:
             raise ValueError("`nthreads` must be 1 when a postfilter is set")
 

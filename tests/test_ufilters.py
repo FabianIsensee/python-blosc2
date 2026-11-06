@@ -101,7 +101,8 @@ def test_ufilters(contiguous, urlpath, nchunks, filters, filters_meta, dtype):
         ({"nthreads": 1, "filters": [255], "filters_meta": [4]}, {"nthreads": 4}),
     ],
 )
-def test_pyufilters_error(cparams, dparams):
+def test_pyufilters_nthreads(cparams, dparams):
+    # C-Blosc2 runs Python filters on the calling thread, whatever nthreads says
     if blosc2.IS_WASM:
         pytest.skip("nthreads are coerced to 1 on wasm32")
 
@@ -123,17 +124,20 @@ def test_pyufilters_error(cparams, dparams):
         blosc2.register_filter(255, forward, backward)
 
     nchunks = 1
-    chunk_len = 100
+    chunk_len = 20 * 1000
     fill_value = 341
     data = np.full(chunk_len * nchunks, fill_value, dtype=dtype)
+    cparams = {**cparams, "blocksize": chunk_len}  # 4 blocks per chunk
 
-    with pytest.raises(ValueError):
-        _ = blosc2.SChunk(
-            chunksize=chunk_len * dtype.itemsize,
-            data=data,
-            cparams=blosc2.CParams(**cparams),
-            dparams=dparams,
-        )
+    schunk = blosc2.SChunk(
+        chunksize=chunk_len * dtype.itemsize,
+        data=data,
+        cparams=blosc2.CParams(**cparams),
+        dparams=dparams,
+    )
+    out = np.empty_like(data)
+    schunk.get_slice(out=out)
+    assert np.array_equal(out, data)
 
 
 @pytest.mark.parametrize(

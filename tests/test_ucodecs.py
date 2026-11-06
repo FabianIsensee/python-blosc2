@@ -92,7 +92,8 @@ def test_ucodecs(contiguous, urlpath, cparams, nchunks, codec_name, id, dtype):
         ({"codec": 163, "nthreads": 4}, {"nthreads": 1}),
     ],
 )
-def test_pyucodecs_error(cparams, dparams):
+def test_pyucodecs_nthreads(cparams, dparams):
+    # C-Blosc2 runs Python codecs on the calling thread, whatever nthreads says
     if blosc2.IS_WASM:
         pytest.skip("nthreads are coerced to 1 on wasm32")
 
@@ -122,14 +123,18 @@ def test_pyucodecs_error(cparams, dparams):
     nchunks = 2
     fill_value = 341
     data = np.full(chunk_len * nchunks, fill_value, dtype=dtype)
+    # 4 blocks per chunk, without the shuffle that would make the codec unnecessary for constant data
+    cparams = {**cparams, "filters": [blosc2.Filter.NOFILTER], "filters_meta": [0], "blocksize": chunk_len}
 
-    with pytest.raises(ValueError):
-        _ = blosc2.SChunk(
-            chunksize=chunk_len * dtype.itemsize,
-            data=data,
-            cparams=cparams,
-            dparams=dparams,
-        )
+    schunk = blosc2.SChunk(
+        chunksize=chunk_len * dtype.itemsize,
+        data=data,
+        cparams=cparams,
+        dparams=dparams,
+    )
+    out = np.empty_like(data)
+    schunk.get_slice(out=out)
+    assert np.array_equal(out, data)
 
 
 @pytest.mark.parametrize(
