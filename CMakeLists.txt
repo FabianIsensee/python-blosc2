@@ -20,7 +20,7 @@ set(BLOSC2_MIN_VERSION 3.5.1)
 set(BLOSC2_BUNDLED_VERSION fa29efc0644eca9315e049092f87b720da5ce490)
 # TEMPORARY (integration-all only): build against c-blosc2 integration-all = upstream main + the open PRs
 set(BLOSC2_BUNDLED_REPOSITORY https://github.com/FabianIsensee/c-blosc2)
-set(BLOSC2_BUNDLED_VERSION a65db9e3a8f978267bcc6711344a030196b80fe6)
+set(BLOSC2_BUNDLED_VERSION 62e313becd305725e52ab1b3370f2cf4e8e90833)
 
 if(WIN32 AND NOT CMAKE_C_COMPILER_ID STREQUAL "Clang")
     message(FATAL_ERROR "Windows builds require clang-cl. Set CC/CXX to clang-cl or configure CMake with -T ClangCL.")
