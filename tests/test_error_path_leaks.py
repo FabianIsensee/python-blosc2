@@ -121,8 +121,8 @@ def arr():
         # The index arrays and the output buffer (about 180 bytes) were leaked
         pytest.param(
             lambda arr, path: arr.oindex[[0, 1000], [0]],
-            RuntimeError,
-            "Error while getting orthogonal selection",
+            IndexError,  # integration-all: #779 checks the indices before C
+            "out of bounds",
             64,
             id="oindex",
         ),
@@ -170,7 +170,8 @@ def test_asarray_error_releases_input(missing_dir_path):
 
 def test_setitem_error_releases_value(arr):
     def call(x):
-        with pytest.raises(RuntimeError, match="Error while setting the slice"):
+        # integration-all: #784 checks the value's shape before C
+        with pytest.raises(ValueError, match="could not broadcast"):
             arr[0:10, 0:20] = x
 
     _assert_released(lambda: np.zeros(4, dtype=np.int32), call)
@@ -178,7 +179,8 @@ def test_setitem_error_releases_value(arr):
 
 def test_oindex_setitem_error_releases_value(arr):
     def call(x):
-        with pytest.raises(RuntimeError, match="orthogonal selection"):
+        # integration-all: #779 checks the indices before C
+        with pytest.raises(IndexError, match="out of bounds"):
             arr.oindex[[0, 1000], [0, 1]] = x
 
     _assert_released(lambda: np.zeros((2, 2), dtype=np.int32), call)
