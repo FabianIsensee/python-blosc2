@@ -3840,12 +3840,12 @@ cdef c_bool _chunk_runs_python(const uint8_t *chunk, int32_t chunksize) noexcept
     return False
 
 cdef int _blosc1_decompress(const uint8_t *src, int32_t srcsize, void *dest, size_t destsize) noexcept:
-    """blosc1_decompress(), which uses the global context and its number of threads, except for chunks that
+    """blosc2_decompress(), which uses the global context and its number of threads, except for chunks that
     can run Python code (see _chunk_runs_python()): those get a context of one thread of their own."""
     cdef blosc2_context *dctx
     cdef int rc
     if not _chunk_runs_python(src, srcsize):
-        return blosc1_decompress(src, dest, destsize)
+        return blosc2_decompress(src, srcsize, dest, <int32_t>destsize)
     dctx = blosc2_create_dctx(BLOSC2_DPARAMS_DEFAULTS)  # one thread
     if dctx == NULL:
         return BLOSC2_ERROR_MEMORY_ALLOC
